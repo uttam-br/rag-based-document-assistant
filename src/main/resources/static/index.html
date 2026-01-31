@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Document Assistant</title>
+    <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #f4f4f4;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: #2c3e50;
+        }
+
+        .container {
+            width: 80%;
+            max-width: 800px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .section {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px dashed #ccc;
+        }
+
+        .section:last-child {
+            border-bottom: none;
+        }
+
+        input[type="file"] {
+            margin-bottom: 10px;
+        }
+
+        button {
+            background-color: #2c3e50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background-color: #34495e;
+        }
+
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        #chat-history {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background: #fff;
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message {
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 80%;
+        }
+
+        .user-message {
+            align-self: flex-end;
+            background-color: #e3f2fd;
+            border: 1px solid #bbdefb;
+        }
+
+        .bot-message {
+            align-self: flex-start;
+            background-color: #f1f8e9;
+            border: 1px solid #c8e6c9;
+        }
+
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+
+        #question-input {
+            flex-grow: 1;
+            padding: 10px;
+            font-family: inherit;
+            border: 1px solid #ccc;
+        }
+
+        .status {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Document Assistant</h1>
+
+    <div class="container">
+        <!-- Upload Section -->
+        <div class="section">
+            <h3>1. Upload Document</h3>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <input type="file" id="file-input" accept=".pdf,.txt">
+                <button onclick="uploadFile()" id="upload-btn">Upload</button>
+            </div>
+            <div id="upload-status" class="status"></div>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="section">
+            <h3>2. Chat</h3>
+            <div id="chat-history"></div>
+            <div class="input-area">
+                <input type="text" id="question-input" placeholder="Ask a question about the document..."
+                    onkeypress="handleKeyPress(event)">
+                <button onclick="askQuestion()" id="send-btn">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Generate a unique ID for this session
+        const conversationId = 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        console.log("Current Conversation ID:", conversationId);
+
+        async function uploadFile() {
+            const fileInput = document.getElementById('file-input');
+            const statusDiv = document.getElementById('upload-status');
+            const uploadBtn = document.getElementById('upload-btn');
+
+            if (!fileInput.files[0]) {
+                statusDiv.textContent = "Please select a file first.";
+                statusDiv.style.color = "red";
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            uploadBtn.disabled = true;
+            statusDiv.textContent = "Uploading and processing...";
+            statusDiv.style.color = "blue";
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const text = await response.text();
+
+                statusDiv.textContent = text;
+                statusDiv.style.color = response.ok ? "green" : "red";
+            } catch (error) {
+                statusDiv.textContent = "Error: " + error.message;
+                statusDiv.style.color = "red";
+            } finally {
+                uploadBtn.disabled = false;
+            }
+        }
+
+        async function askQuestion() {
+            const input = document.getElementById('question-input');
+            const history = document.getElementById('chat-history');
+            const sendBtn = document.getElementById('send-btn');
+            const question = input.value.trim();
+
+            if (!question) return;
+
+            // Add User Message
+            addMessage(question, 'user-message');
+            input.value = '';
+            input.disabled = true;
+            sendBtn.disabled = true;
+
+            // Loading placeholder
+            const loadingId = addMessage("Thinking...", 'bot-message');
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: question,
+                        conversationId: conversationId
+                    })
+                });
+                const data = await response.json();
+
+                // Remove loading and add real response
+                document.getElementById(loadingId).remove();
+                addMessage(data.response, 'bot-message');
+
+            } catch (error) {
+                document.getElementById(loadingId).remove();
+                addMessage("Error: " + error.message, 'bot-message');
+            } finally {
+                input.disabled = false;
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        }
+
+        function addMessage(text, className) {
+            const history = document.getElementById('chat-history');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${className}`;
+            msgDiv.id = 'msg-' + Date.now();
+            msgDiv.innerText = text; // Secure text content
+            history.appendChild(msgDiv);
+            history.scrollTop = history.scrollHeight;
+            return msgDiv.id;
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                askQuestion();
+            }
+        }
+    </script>
+
+</body>
+
+</html>
